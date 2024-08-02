@@ -1,4 +1,6 @@
 import streamlit as st
+import pandas as pd
+import io
 
 class OrdersReader:
 
@@ -54,6 +56,22 @@ class OrdersReader:
             for error in errors:
                 st.error(f"Erro na validação: {error}")
         else:
-            st.success("O schema do arquivo Excel está correto!")
+            st.success("As colunas do arquivo Excel estão corretas!")
             st.success("Aqui está o seu baseline!")
-            st.dataframe(df)
+
+            buffer = io.BytesIO()
+
+                # Salvar o DataFrame no buffer como Excel
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+
+            # Definir o ponteiro do buffer para o início
+            buffer.seek(0)
+
+            # Adicionar um botão para download
+            st.download_button(
+                label="Baixar como Excel",
+                data=buffer,
+                file_name="baseline.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
