@@ -26,7 +26,7 @@ def main():
     date_utils = DateUtils()
  
     
-    upload_orders_history = orders_reader.upload_file("Carregue o arquivo excel com o histórico de Pedidos aqui!")
+    upload_orders_history = orders_reader.upload_file("Carregue o arquivo excel com o histórico de Pedidos aqui! (`historico_pedidos.xlsx`)")
 
 
     errors = []
@@ -36,7 +36,7 @@ def main():
         def log_callback(message):
              message_display.update_processing_message(message)
 
-        df, result, errors = data_processor.process_file(upload_orders_history, log_callback)
+        df, result, errors = data_processor.process_history_orders(upload_orders_history, log_callback)
 
         df_filtered = data_processor.filter_dataframe(df, start_date, end_date)
         df_filtered = data_processor.order_data_enricher(df_filtered)
@@ -54,10 +54,9 @@ def main():
 
         baseline = data_processor.create_baseline_forecast(dias_previsao,baseline)
 
-
         final_baseline = data_processor.baseline_output(baseline, pracas_permitidas)
 
-        result_display.display_results(result, errors, df=final_baseline)
+        result_display.display_baseline_results(result, errors, df=final_baseline)
 
     if errors:
             message_display.display_wrong_message()

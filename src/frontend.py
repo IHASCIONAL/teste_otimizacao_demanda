@@ -66,7 +66,7 @@ class DateInputs:
         return incluir_mes_seguinte
 
 class ResultDisplay:
-    def display_results(self, result, errors, df):
+    def display_baseline_results(self, result, errors, df):
         if errors:
             for error in errors:
                 st.error(f"Erro na validação: {error}")
@@ -90,6 +90,14 @@ class ResultDisplay:
                 file_name="baseline.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+    def display_top_forecasting_results(self, df, success, errors):
+        if not success:
+            st.error("Erro ao processar o arquivo. Verifique a mensagem abaixo:")
+            st.error(errors)
+        else:
+            st.success("Arquivo processado com sucesso!")
+
 
 class OrdersReader:
     def __init__(self, file_types=["xlsx"]):

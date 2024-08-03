@@ -8,34 +8,51 @@ from typing import Literal
 class DataProcessor:
     def __init__(self):
         pass
-    
-    def process_file(self,uploaded_file,log_callback=None):
+
+    def _load_file(self, uploaded_file, log_callback):
         if log_callback:
             log_callback("Espere um momento...")
         try:
             df = pd.read_excel(uploaded_file)
             if log_callback:
                 log_callback("Arquivo carregado com sucesso.")
-            
-            errors = []
-            extra_cols = set(df.columns) - set(Orders.model_fields.keys())
-            if extra_cols:
-                return False, f"Colunas extras detectadas no Excel: {', '.join(extra_cols)}"
+            return df, None
+        except Exception as e:
+            return pd.DataFrame(), f"Erro inesperado ao carregar o arquivo: {str(e)}"
 
-            if log_callback:
-                log_callback("Validando linhas do arquivo...")
-            for index, row in df.iterrows():
-                try:
-                    _ = Orders(**row.to_dict())
-                except Exception as e:
-                    errors.append(f"Erro na linha {index + 2}: {e}")
+    def process_history_orders(self, uploaded_file, log_callback=None):
+        df, error = self._load_file(uploaded_file, log_callback)
+        if error:
+            return df, error
+
+        errors = []
+        extra_cols = set(df.columns) - set(Orders.model_fields.keys())
+        if extra_cols:
+            return False, f"Colunas extras detectadas no Excel: {', '.join(extra_cols)}"
+
+        if log_callback:
+            log_callback("Validando linhas do arquivo...")
+        for index, row in df.iterrows():
+            try:
+                _ = Orders(**row.to_dict())
+            except Exception as e:
+                errors.append(f"Erro na linha {index + 2}: {e}")
+
+        if log_callback:
+            log_callback("Validação concluída.")
+        return df, True, errors
+    
+    def process_top_forecasting_file(self, uploaded_file, log_callback=None):
+            df, error = self._load_file(uploaded_file, log_callback)
+            if error:
+                return df, error
+
+            if df.shape[0] != 22:
+                return False, f"O número de linhas no arquivo deve ser 22, mas o arquivo possui {df.shape[0]} linhas."
 
             if log_callback:
                 log_callback("Validação concluída.")
-            return df, True, errors
-
-        except Exception as e:
-            return pd.DataFrame(), f"Erro inesperado: {str(e)}"
+            return df, True, []
         
     @staticmethod
     def filter_dataframe(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> pd.DataFrame:
@@ -199,6 +216,93 @@ class DataProcessor:
         baseline_por_praca = baseline_por_praca.merge(allowed_squares, on=["modal", "logistic_region"], how='inner')
 
         return baseline_por_praca
+    
+class FixingTopForecastingFile:
+    def __init__(self, uploaded_data):
+        self.uploaded_data = uploaded_data
+
+
+    def list_forecastings_squares(self) -> list:
+        nan_rows = self.uploaded_data.index[self.uploaded_data.isna().all(axis=1)].tolist()
+
+        # Dividir o DataFrame com base nas linhas de NaN
+        dfs = []
+        start_idx = 0
+
+        for idx in nan_rows:
+            if idx > start_idx:
+                # Adiciona o DataFrame da seção anterior
+                dfs.append(self.uploaded_data.iloc[start_idx:idx].reset_index(drop=True))
+                start_idx = idx + 1
+
+        # Adiciona o último DataFrame
+        dfs.append(self.uploaded_data.iloc[start_idx:].reset_index(drop=True))
+
+        return dfs
+    
+    def fixing_columns(self, dfs):
+        lista_previsoes = ["BRASIL-SEM-PRACA", "BRASIL", "SP", "RIO-ZONA-SUL"]
+
+        if len(lista_previsoes) != len(dfs):
+            raise ValueError("A lista de previsões deve ter o mesmo comprimento que a lista de DataFrames")
+
+        # Adicionar a coluna com o literal correspondente e garantir que seja a primeira coluna
+        for i, df in enumerate(dfs):
+            df.insert(0, 'Tipo', lista_previsoes[i])
+
+    def set_headers(self, dfs):
+        # Definir o cabeçalho para o primeiro DataFrame
+        dfs[0].columns = dfs[0].iloc[0]  # Define a primeira linha como cabeçalho
+        dfs[0] = dfs[0][1:]  # Remove a primeira linha que agora é o cabeçalho
+        dfs[0].reset_index(drop=True, inplace=True)  # Resetar o índice
+
+        # Definir o cabeçalho para os DataFrames restantes
+        for i in range(1, len(dfs)):
+            dfs[i].columns = dfs[i].iloc[1]  # Define a segunda linha como cabeçalho
+            dfs[i] = dfs[i][2:]  # Remove as duas primeiras linhas que agora são cabeçalhos
+            dfs[i].reset_index(drop=True, inplace=True)  # Resetar o índice
+
+    def transform_dates_to_rows(self, df):
+        # Supondo que as colunas que devem ser transformadas começam a partir da coluna 2
+        value_vars = df.columns[2:]  # Seleciona todas as colunas a partir da terceira
+        df_melted = pd.melt(df, id_vars=df.columns[:2], value_vars=value_vars,
+                            var_name='DATA', value_name='ORDERS')
+        return df_melted
+
+    def process_dataframe(self, df):
+        # Renomear a segunda coluna para 'origem'
+        df.rename(columns={df.columns[0]: 'ORIGEM'}, inplace=True)
+        
+        # Converter a coluna 'DATA' para datetime
+        df['DATA'] = pd.to_datetime(df['DATA'])
+        
+        return df
+
+    def process_all(self):
+        # Aplicar a função de fixing_columns
+        dfs = self.list_forecastings_squares()
+        self.fixing_columns(dfs)
+
+        # Definir os cabeçalhos
+        self.set_headers(dfs)
+
+        # Transformar as datas para linhas
+        dfs_transformed = [self.transform_dates_to_rows(df) for df in dfs]
+
+        # Processar e renomear colunas
+        dfs_processed = [self.process_dataframe(df) for df in dfs_transformed]
+
+        # Concatenar todos os DataFrames em um único DataFrame
+        df_final = pd.concat(dfs_processed, ignore_index=True)
+
+        # Converter valores de 'ORDERS' para float
+        df_final["ORDERS"] = df_final["ORDERS"].astype(float)
+
+        return df_final
+
+
+
+
 
 
 class DateUtils:
@@ -220,3 +324,4 @@ class DateUtils:
         df["data_entrega"] = pd.to_datetime(df["data_entrega"], format="%Y-%m-%d")
         df["dds"] = df["data_entrega"].dt.weekday
         return df
+    
