@@ -1,60 +1,66 @@
-from frontend import OrdersReader
-from backend import(
-    process_excel,
-    filter_dataframe,
-    feature_engineering,
-    calcula_tendencia_central,
-    clip_growth_and_merge,
-    dias_ate_fim_do_mes,
-    baseline_previsao,
-    allowed_squares,
-    baseline_output,
-    history_three_weeks,
-    adjust_baseline
-)
+from frontend import (PageConfig,
+                    Header,
+                    OrdersReader,
+                    DateInputs,
+                    MessageDisplay,
+                    ResultDisplay
+                    )
+
+from backend import DataProcessor, DateUtils
+
+
 
 def main():
-    odr = OrdersReader()
-    odr.display_header()
-    start_date = odr.data_inicial()
-    end_date = odr.data_final()
-    delivery_date = odr.data_entrega_demanda()
-    incluir_mes_seguinte = odr.mes_seguinte()
-    uploaded_file = odr.upload_file()
+
+    page_config = PageConfig()
+    header = Header()
+    header.display_header()
+    orders_reader = OrdersReader()
+    start_date = DateInputs.data_inicial()
+    end_date = DateInputs.data_final()
+    delivery_date = DateInputs.data_entrega_demanda()
+    incluir_mes_seguinte = DateInputs.mes_seguinte()
+    message_display = MessageDisplay()
+    result_display = ResultDisplay()
+    data_processor = DataProcessor()
+    date_utils = DateUtils()
+ 
+    
+    upload_orders_history = orders_reader.upload_file("Carregue o arquivo excel com o histórico de Pedidos aqui!")
+
 
     errors = []
-    if uploaded_file:
-        odr.display_processing_message()
+    if upload_orders_history:
+        message_display.display_processing_message()
 
         def log_callback(message):
-             odr.update_processing_message(message)
+             message_display.update_processing_message(message)
 
-        df, result, errors = process_excel(uploaded_file, log_callback)
+        df, result, errors = data_processor.process_file(upload_orders_history, log_callback)
 
-        df_filtered = filter_dataframe(df, start_date, end_date)
-        df_filtered = feature_engineering(df_filtered)
-        pracas_permitidas = allowed_squares(end_date, df_filtered)
+        df_filtered = data_processor.filter_dataframe(df, start_date, end_date)
+        df_filtered = data_processor.order_data_enricher(df_filtered)
+        pracas_permitidas = data_processor.allowed_squares(end_date, df_filtered)
 
-        historico_tres_semanas = history_three_weeks(df_filtered, end_date)
-        dias_previsao = dias_ate_fim_do_mes(delivery_date, incluir_mes_seguinte)
+        historico_tres_semanas = data_processor.history_three_weeks(df_filtered, end_date)
+        dias_previsao = date_utils.generate_dates_until_end_of_month(delivery_date, incluir_mes_seguinte)
 
-        media_tres_semanas = calcula_tendencia_central(historico_tres_semanas, ["qtd_pedido"], "mean")
-        lista_medianas = calcula_tendencia_central(df_filtered, ["var_lw", "qtd_pedido"],"median")
+        df_media_tres_semanas = data_processor.calculate_central_tendency(historico_tres_semanas, ["qtd_pedido"], "mean")
+        lista_medianas = data_processor.calculate_central_tendency(df_filtered, ["var_lw", "qtd_pedido"],"median")
 
-        baseline = clip_growth_and_merge(lista_medianas)
+        baseline = data_processor.clip_growth_and_merge(lista_medianas)
 
-        baseline = adjust_baseline(baseline, media_tres_semanas)
+        baseline = data_processor.adjust_baseline(baseline, df_media_tres_semanas)
 
-        baseline = baseline_previsao(dias_previsao,baseline)
+        baseline = data_processor.create_baseline_forecast(dias_previsao,baseline)
 
-        pracas_permitidas = allowed_squares(end_date, df_filtered)
 
-        final_baseline = baseline_output(baseline, pracas_permitidas)
+        final_baseline = data_processor.baseline_output(baseline, pracas_permitidas)
 
-        odr.display_results(result, errors, df=final_baseline)
+        result_display.display_results(result, errors, df=final_baseline)
 
     if errors:
-            odr.display_wrong_message()
+            message_display.display_wrong_message()
 
 
 if __name__ == "__main__":
