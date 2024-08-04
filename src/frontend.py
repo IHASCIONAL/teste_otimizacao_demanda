@@ -96,7 +96,14 @@ class ResultDisplay:
             st.error("Erro ao processar o arquivo. Verifique a mensagem abaixo:")
             st.error(errors)
         else:
-            st.success("Arquivo processado com sucesso!")
+            pass
+
+    def display_baseline_adjusted_results(self, df, success, errors):
+        if not success:
+            st.error("Erro ao processar o arquivo. Verifique a mensagem abaixo:")
+            st.error(errors)
+        else:
+            pass
 
 
 class OrdersReader:

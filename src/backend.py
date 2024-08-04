@@ -4,6 +4,7 @@ from contrato import Orders
 from collections import defaultdict
 from datetime import datetime, timedelta, date
 from typing import Literal
+import streamlit as st
 
 class DataProcessor:
     def __init__(self):
@@ -50,9 +51,33 @@ class DataProcessor:
             if df.shape[0] != 22:
                 return False, f"O número de linhas no arquivo deve ser 22, mas o arquivo possui {df.shape[0]} linhas."
 
-            if log_callback:
-                log_callback("Validação concluída.")
             return df, True, []
+    
+    def process_adjusted_baseline(self, uploaded_file, old_final_baseline, log_callback=None):
+        df, error = self._load_file(uploaded_file, log_callback)
+        if error:
+            return df, error
+
+        errors = []
+
+        # Obter as 5 primeiras colunas do DataFrame
+        first_five_columns = set(df.columns[:5])
+        
+        # Obter as colunas do contrato do modelo
+        contract_columns = set(Orders.__annotations__.keys())
+        
+        # Verificar se todas as 5 primeiras colunas estão no contrato
+        if not first_five_columns.issubset(contract_columns):
+            missing_columns = first_five_columns - contract_columns
+            errors.append(f"Colunas das 5 primeiras posições não estão todas no contrato: {', '.join(missing_columns)}")
+
+        if log_callback:
+            log_callback("Validação das 5 primeiras colunas concluída.")
+
+        return df, not errors, errors
+
+
+        
         
     @staticmethod
     def filter_dataframe(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> pd.DataFrame:
@@ -299,9 +324,6 @@ class FixingTopForecastingFile:
         df_final["ORDERS"] = df_final["ORDERS"].astype(float)
 
         return df_final
-
-
-
 
 
 

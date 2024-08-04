@@ -4,6 +4,8 @@ from frontend import (
 
 from backend import DataProcessor, FixingTopForecastingFile
 
+import streamlit as st
+
 def main():
     page_config = PageConfig(page_title="Consolidador", layout="wide")
     header = Header(title="Consolidador", subtitle=None)
@@ -14,22 +16,28 @@ def main():
     result_display = ResultDisplay()
 
     upload_top_forecasting = orders_reader.upload_file("Carregue o arquivo de previsão que você gerou! (`previsao_top.xslx`)")
+    upload_adjusted_baseline = orders_reader.upload_file("Carregue o arquivo baseline que você ajustou!")
 
-
-    errors = []
-    if upload_top_forecasting:
+    if upload_top_forecasting and upload_adjusted_baseline:
         message_display.display_processing_message()
 
         def log_callback(message):
-             message_display.update_processing_message(message)
+            message_display.update_processing_message(message)
 
         df, result, errors = data_processor.process_top_forecasting_file(upload_top_forecasting, log_callback)
 
-        fixer = FixingTopForecastingFile(df)
+        baseline, baseline_result, baseline_errors = data_processor.process_adjusted_baseline(upload_adjusted_baseline, log_callback)
 
+        fixer = FixingTopForecastingFile(df)
         df_final = fixer.process_all()
 
         result_display.display_top_forecasting_results(df_final, result, errors)
+        result_display.display_baseline_adjusted_results(baseline, baseline_result, baseline_errors)
+    else:
+        if not upload_top_forecasting:
+            st.warning("Por favor, carregue o arquivo de previsão.")
+        if not upload_adjusted_baseline:
+            st.warning("Por favor, carregue o arquivo baseline ajustado.")
 
 if __name__ == "__main__":
     main()
