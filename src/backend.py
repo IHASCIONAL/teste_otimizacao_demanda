@@ -50,10 +50,10 @@ class DataProcessor:
 
             if df.shape[0] != 22:
                 return False, f"O número de linhas no arquivo deve ser 22, mas o arquivo possui {df.shape[0]} linhas."
-
+   
             return df, True, []
     
-    def process_adjusted_baseline(self, uploaded_file, old_final_baseline, log_callback=None):
+    def process_adjusted_baseline(self, uploaded_file, log_callback=None):
         df, error = self._load_file(uploaded_file, log_callback)
         if error:
             return df, error
@@ -77,7 +77,6 @@ class DataProcessor:
         return df, not errors, errors
 
 
-        
         
     @staticmethod
     def filter_dataframe(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> pd.DataFrame:
@@ -116,28 +115,6 @@ class DataProcessor:
         )
 
         return allowed_squares
-    
-    @staticmethod
-    def history_three_weeks(df: pd.DataFrame, DATA_MAXIMA) -> pd.DataFrame:
-        tres_semanas = timedelta(weeks=3)
-
-        # Garantir que DATA_MAXIMA é um pd.Timestamp
-        DATA_MAXIMA = pd.Timestamp(DATA_MAXIMA)
-
-        # Converter a coluna data_entrega para pd.Timestamp se necessário
-        if df["data_entrega"].dtype == 'object':
-            df["data_entrega"] = pd.to_datetime(df["data_entrega"])
-
-        # Calcular a data mínima como pd.Timestamp
-        data_minima = DATA_MAXIMA - tres_semanas
-
-        # Filtrar o DataFrame
-        historico_tres_semanas = df[
-            (df["data_entrega"] >= data_minima) &
-            (df["data_entrega"] <= DATA_MAXIMA)
-        ]
-
-        return historico_tres_semanas
     
     @staticmethod
     def calculate_central_tendency(df: pd.DataFrame, cols_to_calc: list, type: Literal["median", "mean"] = "median") -> pd.DataFrame:
@@ -195,25 +172,6 @@ class DataProcessor:
 
         return final_df
     
-    @staticmethod
-    def adjust_baseline(baseline, media_tres_semanas):
-        baseline_comparison = baseline.merge(media_tres_semanas, on=["modal", "big_region", "logistic_region", "shift", "turno_g", "dds"], how='left')
-
-        baseline_comparison["mean_qtd_pedido"] = baseline_comparison["mean_qtd_pedido"].fillna(0)
-
-        baseline_comparison["var"] = abs(np.where(
-            baseline_comparison["mean_qtd_pedido"] != 0,
-            baseline_comparison["orders"] / baseline_comparison["mean_qtd_pedido"] - 1,
-            0
-        ))
-        baseline_comparison["orders"] = np.where(
-            baseline_comparison["var"] > 0.2, # SE A VARIAÇÃO ENTRE MEDIANA E MÉDIA DAS ÚLTIMAS 3 SEMANAS FOR SUPERIOR A 20%, MANTENHA A MÉDIA DAS ÚLTIMAS 3 SEMANAS
-            baseline_comparison["mean_qtd_pedido"], baseline_comparison["orders"]
-        )
-
-        baseline_comparison["orders"] = baseline_comparison["orders"].round(0).astype(int)
-
-        return baseline_comparison
     
     @staticmethod
     def create_baseline_forecast(dias_previsao: list, baseline: pd.DataFrame):
@@ -242,6 +200,95 @@ class DataProcessor:
 
         return baseline_por_praca
     
+    @staticmethod
+    def melting_baseline_adjusted(baseline_adjusted: pd.DataFrame) -> pd.DataFrame:
+        df = pd.melt(baseline_adjusted, id_vars=['big_region','logistic_region','modal','shift','turno_g'],                     
+                    var_name='data_entrega', value_name='qtd_pedidos')
+
+        df['qtd_pedidos'] = df['qtd_pedidos'].fillna(0).astype(int)
+
+        df['data_entrega'] = pd.to_datetime(df['data_entrega'])
+
+        print(df.dtypes)
+        return df
+    
+    @staticmethod
+    def process_region_data(baseline_pd, fct_brasil, quebras, group_col):
+        lista_resultados = []
+
+        regions_to_exclude = [region for region in quebras if region != "BRASIL_SEM_PRACA"]
+
+        for quebra in quebras:
+            if quebra == "BRASIL_SEM_PRACA":
+                filter_query = f"logistic_region not in {regions_to_exclude}"
+            else:
+                filter_query = f"logistic_region == '{quebra}'"
+
+            consolidar = (
+                baseline_pd
+                    .query(filter_query)
+                    .groupby(["data_entrega", "big_region", "logistic_region", "modal", group_col])
+                    ['qtd_pedidos'].sum().reset_index()
+            )
+
+
+            consolidar['fake_total_orders'] = consolidar.groupby(["data_entrega", "modal"])['qtd_pedidos'].transform('sum')
+            consolidar['share'] = consolidar['qtd_pedidos'] / consolidar['fake_total_orders']
+
+            base_final = consolidar.merge(fct_brasil.query(f"ORIGEM == '{quebra}'"), on=['data_entrega', 'modal'], how='left')
+            print(base_final.shape)
+            base_final = base_final.loc[~base_final['planned_orders'].isna()]
+            print(base_final.shape)
+            base_final['final_orders'] = base_final['share'] * base_final['planned_orders']
+            base_final = base_final.query("final_orders > 0")
+
+            base_final = base_final[["data_entrega", "big_region", "modal", "logistic_region", group_col, "final_orders"]]
+            base_final = base_final.rename(columns={
+                "data_entrega": "date", 
+                "big_region": "region", 
+                "modal": "business_model", 
+                "final_orders": "orders"
+            }).sort_values(by=["date", "business_model"]).reset_index(drop=True)
+
+            tipo = "gerencial" if group_col == "shift" else "turno_g"
+            base_final["tipo"] = tipo
+            
+            lista_resultados.append(base_final)
+
+        df_final = pd.concat(lista_resultados, ignore_index=True)
+        print(df_final.shape)
+        return df_final
+    
+    @staticmethod
+    def final_validation(base_final_shift, base_final_turno_g):
+        validacao_gerencial = (
+        base_final_shift
+            .groupby(["logistic_region", "date"])
+            ['orders'].sum().reset_index()
+        )
+
+        validacao_turno_g = (
+        base_final_turno_g
+            .groupby(["logistic_region", "date"])
+            ['orders'].sum().reset_index()
+        )
+
+        validacao_final = validacao_gerencial.merge(validacao_turno_g, on=['logistic_region', 'date'], how='left')
+
+        validacao_final['diff'] = validacao_final['orders_x'].round(5) - validacao_final['orders_y'].round(5)
+
+        teste_verdade = int(validacao_final["diff"].sum()) == 0
+
+        print(f"Há coerência entre os pedidos de Gerencial e Turno G?: {teste_verdade}")
+
+        union_df = pd.concat([base_final_shift, base_final_turno_g])
+
+        union_df["date"] = union_df["date"].dt.date
+        if teste_verdade:
+            return union_df
+        else:
+            raise ValueError("Inconsistência detectada entre os pedidos de Gerencial e Turno G")
+        
 class FixingTopForecastingFile:
     def __init__(self, uploaded_data):
         self.uploaded_data = uploaded_data
@@ -266,7 +313,7 @@ class FixingTopForecastingFile:
         return dfs
     
     def fixing_columns(self, dfs):
-        lista_previsoes = ["BRASIL-SEM-PRACA", "BRASIL", "SP", "RIO-ZONA-SUL"]
+        lista_previsoes = ["BRASIL_SEM_PRACA", "BRASIL", "SAO PAULO", "RIO - ZONA SUL"]
 
         if len(lista_previsoes) != len(dfs):
             raise ValueError("A lista de previsões deve ter o mesmo comprimento que a lista de DataFrames")
@@ -291,7 +338,7 @@ class FixingTopForecastingFile:
         # Supondo que as colunas que devem ser transformadas começam a partir da coluna 2
         value_vars = df.columns[2:]  # Seleciona todas as colunas a partir da terceira
         df_melted = pd.melt(df, id_vars=df.columns[:2], value_vars=value_vars,
-                            var_name='DATA', value_name='ORDERS')
+                            var_name='data_entrega', value_name='planned_orders')
         return df_melted
 
     def process_dataframe(self, df):
@@ -299,7 +346,7 @@ class FixingTopForecastingFile:
         df.rename(columns={df.columns[0]: 'ORIGEM'}, inplace=True)
         
         # Converter a coluna 'DATA' para datetime
-        df['DATA'] = pd.to_datetime(df['DATA'])
+        df['data_entrega'] = pd.to_datetime(df['data_entrega'])
         
         return df
 
@@ -321,7 +368,11 @@ class FixingTopForecastingFile:
         df_final = pd.concat(dfs_processed, ignore_index=True)
 
         # Converter valores de 'ORDERS' para float
-        df_final["ORDERS"] = df_final["ORDERS"].astype(float)
+        df_final["planned_orders"] = df_final["planned_orders"].astype(float)
+
+        df_final = df_final.rename(columns={"MODAL": "modal"})
+
+        df_final["modal"] = df_final["modal"].str.replace("NAO CARROS", "NAO_CARROS")
 
         return df_final
 

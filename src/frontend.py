@@ -66,13 +66,12 @@ class DateInputs:
         return incluir_mes_seguinte
 
 class ResultDisplay:
-    def display_baseline_results(self, result, errors, df):
+    def display_results(self, result, errors, df, success_message, file_name):
         if errors:
             for error in errors:
                 st.error(f"Erro na validação: {error}")
         else:
-            st.success("As colunas do arquivo Excel estão corretas!")
-            st.success("Aqui está o seu baseline!")
+            st.success(success_message)
 
             buffer = io.BytesIO()
 
@@ -87,9 +86,27 @@ class ResultDisplay:
             st.download_button(
                 label="Baixar como Excel",
                 data=buffer,
-                file_name="baseline.xlsx",
+                file_name=file_name,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+    def display_baseline_results(self, result, errors, df):
+        self.display_results(
+            result, 
+            errors, 
+            df, 
+            success_message="As colunas do arquivo Excel estão corretas!\nAqui está o seu baseline!", 
+            file_name="baseline.xlsx"
+        )
+
+    def display_final_output(self, result, errors, df):
+        self.display_results(
+            result, 
+            errors, 
+            df, 
+            success_message="Aqui está o seu arquivo final! Baixe-o e cole-o no Google Sheets", 
+            file_name="output.xlsx"
+        )
 
     def display_top_forecasting_results(self, df, success, errors):
         if not success:

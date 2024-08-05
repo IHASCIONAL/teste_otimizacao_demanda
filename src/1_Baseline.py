@@ -7,7 +7,6 @@ from frontend import (PageConfig,
                     )
 
 from backend import DataProcessor, DateUtils
-import streamlit as st
 
 
 
@@ -43,15 +42,11 @@ def main():
         df_filtered = data_processor.order_data_enricher(df_filtered)
         pracas_permitidas = data_processor.allowed_squares(end_date, df_filtered)
 
-        historico_tres_semanas = data_processor.history_three_weeks(df_filtered, end_date)
         dias_previsao = date_utils.generate_dates_until_end_of_month(delivery_date, incluir_mes_seguinte)
 
-        df_media_tres_semanas = data_processor.calculate_central_tendency(historico_tres_semanas, ["qtd_pedido"], "mean")
         lista_medianas = data_processor.calculate_central_tendency(df_filtered, ["var_lw", "qtd_pedido"],"median")
 
         baseline = data_processor.clip_growth_and_merge(lista_medianas)
-
-        baseline = data_processor.adjust_baseline(baseline, df_media_tres_semanas)
 
         baseline = data_processor.create_baseline_forecast(dias_previsao,baseline)
 
